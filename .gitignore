@@ -1,0 +1,8 @@
+.env
+models/
+venv/
+logs/
+test.py
+client.py
+inference_server.pid
+socket_server.pid
