@@ -7,4 +7,4 @@ torch
 pydantic>=1.10.13,<2.0.0
 litserve
 asyncio
-tenancity==9.1.2
+tenancity
