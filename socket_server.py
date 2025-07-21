@@ -116,8 +116,26 @@ async def handle_predict(sid, data):
     results = []
 
     async def process_item(item):
-        text = f"{item.get('title', '')} {item.get('description', '')} {item.get('content', '')}"
-        sentiment = await call_inference(text)
+        item_type = item.get("type", "")
+        content = item.get("content", "")
+        title = item.get("title", "")
+        description = item.get("description", "")
+
+        is_meaningless = not any(c.isalnum() for c in content)
+
+        if is_meaningless:
+            print("is_meaningless")
+            if item_type in ["FBPAGE_TOPIC", "FBGROUP_TOPIC", "FBUSER_TOPIC"]:
+                print(item_type)
+                text = f"{title} {description} {content}"
+                sentiment = await call_inference(text)
+            else:
+                sentiment = "Neutral"
+                text = content 
+        else:
+            text = content
+            sentiment = await call_inference(content)
+            
         word_cloud = generate_word_cloud(text)
 
         return {
@@ -151,4 +169,4 @@ async def handle_predict(sid, data):
 
 # ────────▶️ Main ────────
 if __name__ == '__main__':
-    uvicorn.run(asgi_app, host="0.0.0.0", port=5001, workers=2)
+    uvicorn.run(asgi_app, host="0.0.0.0", port=5001, workers=1)
