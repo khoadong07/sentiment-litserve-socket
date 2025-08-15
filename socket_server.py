@@ -71,7 +71,7 @@ def generate_word_cloud(content: str) -> List[Dict[str, Any]]:
     wait=wait_fixed(2),
     retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))
 )
-async def call_inference(text: str) -> str:
+async def call_inference(text: str):
     """
     Gọi API phân tích cảm xúc (sentiment) từ model server.
     """
@@ -79,11 +79,11 @@ async def call_inference(text: str) -> str:
         async with aiohttp_session.post(INFER_URL, json={"text": text}, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                return data.get("predicted_label", "neutral").lower()
+                return data.get("predicted_label", "neutral").lower(), data.get("confidence", 0)
     except Exception as e:
         print(f"[❗] Inference error: {e}")
 
-    return "neutral"
+    return "neutral", 1.0
 
 
 # ────────🚀 FastAPI Events ────────
@@ -128,13 +128,14 @@ async def handle_predict(sid, data):
             if item_type in ["FBPAGE_TOPIC", "FBGROUP_TOPIC", "FBUSER_TOPIC"]:
                 print(item_type)
                 text = f"{title} {description} {content}"
-                sentiment = await call_inference(text)
+                sentiment, confidence = await call_inference(text)
             else:
                 sentiment = "Neutral"
-                text = content 
+                text = content
+                confidence = 1.0 
         else:
             text = content
-            sentiment = await call_inference(content)
+            sentiment, confidence = await call_inference(content)
             
         word_cloud = generate_word_cloud(text)
 
@@ -152,6 +153,7 @@ async def handle_predict(sid, data):
             "reason": "",
             "input_type": item.get("type", ""),
             "sentiment": sentiment,
+            "confidence": confidence,
             "contains_topic": False,
             "targeting_topic": False,
             "crisis_keywords": [],
