@@ -64,5 +64,5 @@ class BERTLitAPI(LitAPI):
 
 if __name__ == "__main__":
     api = BERTLitAPI()
-    server = LitServer(api, accelerator='cpu', devices=0)
+    server = LitServer(api, accelerator='gpu', devices=1)
     server.run(host="0.0.0.0", port=int(INFERENCE_SERVICE_PORT), num_api_servers=int(INFERENCE_SERVICE_WORKERS), log_level="info")
