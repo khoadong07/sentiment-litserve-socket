@@ -103,7 +103,7 @@ async def shutdown_event():
 
 
 # ────────📡 REST Endpoint ────────
-@app.post("/predict")
+@app.post("/api/predict")
 async def predict(request: PredictRequest):
     items = request.data
 
