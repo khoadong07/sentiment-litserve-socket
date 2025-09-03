@@ -87,7 +87,7 @@ async def call_inference(text: str):
     except Exception as e:
         print(f"[❗] Inference error: {e}")
 
-    return "neutral", 1.0
+    return "Neutral", 1.0
 
 
 # ────────🚀 FastAPI Events ────────
