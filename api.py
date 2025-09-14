@@ -4,11 +4,12 @@ import asyncio
 import aiohttp
 from fastapi import FastAPI
 from pyvi import ViTokenizer
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from dotenv import load_dotenv
 import os
+from starlette import status as http_status
 
 load_dotenv()
 
@@ -21,22 +22,30 @@ aiohttp_session: aiohttp.ClientSession = None
 
 
 # ────────📦 Models ────────
-class InputItem(BaseModel):
-    id: str
-    topic_name: str | None = None
-    topic_id: str | None = None
-    title: str | None = None
-    content: str | None = None
-    description: str | None = None
-    siteName: str | None = None
-    siteId: str | None = None
-    type: str | None = None
-    is_kol: bool | None = False
-    total_interactions: int | None = 0
+# class InputItem(BaseModel):
+#     id: str
+#     topic_name: str | None = None
+#     topic_id: str | None = None
+#     title: str | None = None
+#     content: str | None = None
+#     description: str | None = None
+#     siteName: str | None = None
+#     siteId: str | None = None
+#     type: str | None = None
+#     is_kol: bool | None = False
+#     total_interactions: int | None = 0
 
+class SentiementRequest(BaseModel):
+    id: Optional[str] = None
+    index: Optional[str] = None
+    category: Optional[str] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
 
 class PredictRequest(BaseModel):
-    data: List[InputItem]
+    data: List[SentiementRequest]
 
 
 class WordCloudResponse(BaseModel):
@@ -104,10 +113,10 @@ async def shutdown_event():
 
 # ────────📡 REST Endpoint ────────
 @app.post("/api/predict")
-async def predict(request: PredictRequest):
-    items = request.data
+async def predict(request: List[SentiementRequest]):
+    items = request
 
-    async def process_item(item: InputItem):
+    async def process_item(item: SentiementRequest):
         content = item.content or ""
         title = item.title or ""
         description = item.description or ""
@@ -116,7 +125,7 @@ async def predict(request: PredictRequest):
         is_meaningless = not any(c.isalnum() for c in content)
 
         if is_meaningless:
-            if item_type in ["FBPAGE_TOPIC", "FBGROUP_TOPIC", "FBUSER_TOPIC"]:
+            if item_type in ["fbPageTopic", "fbGroupTopic", "fbUserTopic"]:
                 text = f"{title} {description} {content}"
                 sentiment, confidence = await call_inference(text)
             else:
@@ -127,34 +136,24 @@ async def predict(request: PredictRequest):
             text = content
             sentiment, confidence = await call_inference(content)
 
-        word_cloud = generate_word_cloud(text)
-
         return {
             "id": item.id,
-            "topic_name": item.topic_name,
-            "topic_id": item.topic_id,
-            "title": item.title,
-            "content": item.content,
-            "description": item.description,
-            "site_name": item.siteName,
-            "site_id": item.siteId,
+            "index": item.index,
             "type": item.type,
-            "log_level": None,
-            "reason": "",
-            "input_type": item.type,
             "sentiment": sentiment,
-            "confidence": confidence,
-            "contains_topic": False,
-            "targeting_topic": False,
-            "crisis_keywords": [],
-            "is_kol": item.is_kol,
-            "total_interactions": item.total_interactions,
-            "word_cloud": word_cloud,
+            "confidence": confidence
         }
 
     results = await asyncio.gather(*[process_item(item) for item in items])
-    return {"results": results}
-
+    
+    if not results: 
+        status = http_status.HTTP_400_BAD_REQUEST
+        data = []
+        return {"status": status, "data": data}
+    else:
+        status = http_status.HTTP_200_OK
+        data = results
+        return {"status": status, "data": data}
 
 # ────────▶️ Main ────────
 if __name__ == "__main__":
