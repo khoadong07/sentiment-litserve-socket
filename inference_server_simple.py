@@ -36,8 +36,14 @@ async def load_model():
     device = torch.device("cpu")
     
     # Load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(INFERENCE_MODEL)
-    model = AutoModelForSequenceClassification.from_pretrained(INFERENCE_MODEL)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(INFERENCE_MODEL, trust_remote_code=True)
+    except Exception as e:
+        print(f"Error loading tokenizer with trust_remote_code: {e}")
+        print("Trying with use_fast=False...")
+        tokenizer = AutoTokenizer.from_pretrained(INFERENCE_MODEL, use_fast=False, trust_remote_code=True)
+    
+    model = AutoModelForSequenceClassification.from_pretrained(INFERENCE_MODEL, trust_remote_code=True)
     model.to(device)
     model.eval()
     
