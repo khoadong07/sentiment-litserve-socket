@@ -3,6 +3,8 @@ import uvicorn
 import asyncio
 import aiohttp
 import random
+import hashlib
+import time
 from fastapi import FastAPI
 from pyvi import ViTokenizer
 from typing import List, Dict, Any, Optional
@@ -18,6 +20,7 @@ load_dotenv()
 
 # ────────⚙️ Config ────────
 INFER_URL = os.getenv("INFER_URL")
+CACHE_TTL = 30 * 60  # 30 minutes in seconds
 
 # ────────🌐 FastAPI ────────
 app = FastAPI()
@@ -26,6 +29,66 @@ aiohttp_session: aiohttp.ClientSession = None
 # ────────🧠 LLM Classifier ────────
 sentiment_analyzer = None
 keywords_dict = None
+
+# ────────💾 Cache ────────
+# Format: {cache_key: {"result": {...}, "timestamp": float}}
+response_cache = {}
+
+
+# ────────💾 Cache Utils ────────
+def generate_cache_key(content: str, title: str, description: str, index: str) -> str:
+    """
+    Tạo cache key từ content, title, description, index
+    """
+    combined = f"{content}|{title}|{description}|{index}"
+    return hashlib.md5(combined.encode('utf-8')).hexdigest()
+
+
+def get_from_cache(cache_key: str) -> Optional[Dict]:
+    """
+    Lấy kết quả từ cache nếu còn valid (trong 30 phút)
+    """
+    if cache_key in response_cache:
+        cached_item = response_cache[cache_key]
+        age = time.time() - cached_item["timestamp"]
+        
+        if age < CACHE_TTL:
+            print(f"[💾] Cache hit: {cache_key[:8]}... (age: {int(age)}s)")
+            return cached_item["result"]
+        else:
+            # Cache expired, xóa đi
+            del response_cache[cache_key]
+            print(f"[🗑️] Cache expired: {cache_key[:8]}...")
+    
+    return None
+
+
+def save_to_cache(cache_key: str, result: Dict):
+    """
+    Lưu kết quả vào cache
+    """
+    response_cache[cache_key] = {
+        "result": result,
+        "timestamp": time.time()
+    }
+    print(f"[💾] Cached: {cache_key[:8]}... (total: {len(response_cache)} items)")
+
+
+def clean_expired_cache():
+    """
+    Dọn dẹp cache đã hết hạn
+    """
+    current_time = time.time()
+    expired_keys = [
+        key for key, value in response_cache.items()
+        if current_time - value["timestamp"] >= CACHE_TTL
+    ]
+    
+    for key in expired_keys:
+        del response_cache[key]
+    
+    if expired_keys:
+        print(f"[🗑️] Cleaned {len(expired_keys)} expired cache items")
 
 
 # ────────📦 Models ────────
@@ -144,12 +207,25 @@ async def predict(request: List[SentiementRequest]):
     items = request
     print(f"[📥] Received {len(items)} items")
     
+    # Dọn dẹp cache hết hạn trước khi xử lý
+    clean_expired_cache()
+    
     async def process_item(item: SentiementRequest):
         content = item.content or ""
         title = item.title or ""
         description = item.description or ""
         item_type = item.type or ""
         index = item.index or ""
+        
+        # Tạo cache key
+        cache_key = generate_cache_key(content, title, description, index)
+        
+        # Check cache trước
+        cached_result = get_from_cache(cache_key)
+        if cached_result is not None:
+            # Update id từ request hiện tại (vì id có thể khác nhau)
+            cached_result["id"] = item.id
+            return cached_result
         
         # Check điều kiện: type == "newsTopic" và index có keywords
         should_use_llm = False
@@ -173,13 +249,18 @@ async def predict(request: List[SentiementRequest]):
                 sentiment = await sentiment_analyzer.analyze_async(article, aiohttp_session)
                 confidence = round(random.uniform(0.75, 0.9), 2)
                 
-                return {
+                result = {
                     "id": item.id,
                     "index": item.index,
                     "type": item.type,
                     "sentiment": sentiment,
                     "confidence": confidence
                 }
+                
+                # Lưu vào cache
+                save_to_cache(cache_key, result)
+                
+                return result
             except (ConnectionError, TimeoutError) as e:
                 print(f"[❗] LLM connection error for item {item.id}: {e}")
             except KeyError as e:
@@ -205,13 +286,18 @@ async def predict(request: List[SentiementRequest]):
             text = content
             sentiment, confidence = await call_inference(content)
 
-        return {
+        result = {
             "id": item.id,
             "index": item.index,
             "type": item.type,
             "sentiment": sentiment,
             "confidence": confidence
         }
+        
+        # Lưu vào cache
+        save_to_cache(cache_key, result)
+        
+        return result
 
     results = await asyncio.gather(*[process_item(item) for item in items])
     
