@@ -115,7 +115,7 @@ async def shutdown_event():
 @app.post("/api/predict")
 async def predict(request: List[SentiementRequest]):
     items = request
-
+    print(items)
     async def process_item(item: SentiementRequest):
         content = item.content or ""
         title = item.title or ""
