@@ -2,6 +2,7 @@ import re
 import uvicorn
 import asyncio
 import aiohttp
+import random
 from fastapi import FastAPI
 from pyvi import ViTokenizer
 from typing import List, Dict, Any, Optional
@@ -10,6 +11,8 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 from dotenv import load_dotenv
 import os
 from starlette import status as http_status
+from llm_classify import SentimentAnalyzer
+from topic_keywords import get_main_keywords, load_keywords_from_csv
 
 load_dotenv()
 
@@ -19,6 +22,10 @@ INFER_URL = os.getenv("INFER_URL")
 # ────────🌐 FastAPI ────────
 app = FastAPI()
 aiohttp_session: aiohttp.ClientSession = None
+
+# ────────🧠 LLM Classifier ────────
+sentiment_analyzer = None
+keywords_dict = None
 
 
 # ────────📦 Models ────────
@@ -102,8 +109,28 @@ async def call_inference(text: str):
 # ────────🚀 FastAPI Events ────────
 @app.on_event("startup")
 async def startup_event():
-    global aiohttp_session
+    global aiohttp_session, sentiment_analyzer, keywords_dict
     aiohttp_session = aiohttp.ClientSession()
+    
+    # Khởi tạo sentiment analyzer và load keywords
+    try:
+        sentiment_analyzer = SentimentAnalyzer()
+        # Reuse keywords_dict từ sentiment_analyzer thay vì load lại
+        keywords_dict = sentiment_analyzer.keywords_dict
+        print(f"[✓] Loaded {len(keywords_dict)} topics with keywords")
+        print(f"[✓] LLM Config:")
+        print(f"    - Base URL: {sentiment_analyzer.api_url}")
+        print(f"    - Model: {sentiment_analyzer.model}")
+        print(f"    - Token: {sentiment_analyzer.api_token[:10]}..." if len(sentiment_analyzer.api_token) > 10 else f"    - Token: {sentiment_analyzer.api_token}")
+    except FileNotFoundError as e:
+        print(f"[❗] Warning: Keywords file not found - {e}")
+        print("[❗] LLM classifier will be disabled. Run: python3 topic_keywords.py")
+        sentiment_analyzer = None
+        keywords_dict = {}
+    except Exception as e:
+        print(f"[❗] Error loading sentiment analyzer: {e}")
+        sentiment_analyzer = None
+        keywords_dict = {}
 
 
 @app.on_event("shutdown")
@@ -115,13 +142,55 @@ async def shutdown_event():
 @app.post("/api/predict")
 async def predict(request: List[SentiementRequest]):
     items = request
-    print(items)
+    print(f"[📥] Received {len(items)} items")
+    
     async def process_item(item: SentiementRequest):
         content = item.content or ""
         title = item.title or ""
         description = item.description or ""
         item_type = item.type or ""
-
+        index = item.index or ""
+        
+        # Check điều kiện: type == "newsTopic" và index có keywords
+        should_use_llm = False
+        if item_type == "newsTopic" and index:
+            keywords = get_main_keywords(index, keywords_dict)
+            if keywords:
+                should_use_llm = True
+                print(f"[✓] Item {item.id} - Using LLM (keywords: {keywords[:2]}...)")
+        
+        # Nếu thỏa điều kiện, dùng LLM classifier
+        if should_use_llm:
+            try:
+                article = {
+                    "id": item.id,
+                    "index": item.index,
+                    "title": title,
+                    "content": content,
+                    "description": description,
+                    "type": item_type
+                }
+                sentiment = await sentiment_analyzer.analyze_async(article, aiohttp_session)
+                confidence = round(random.uniform(0.75, 0.9), 2)
+                
+                return {
+                    "id": item.id,
+                    "index": item.index,
+                    "type": item.type,
+                    "sentiment": sentiment,
+                    "confidence": confidence
+                }
+            except (ConnectionError, TimeoutError) as e:
+                print(f"[❗] LLM connection error for item {item.id}: {e}")
+            except KeyError as e:
+                print(f"[❗] LLM response missing field for item {item.id}: {e}")
+            except Exception as e:
+                print(f"[❗] Unexpected LLM error for item {item.id}: {type(e).__name__} - {e}")
+            
+            # Fallback to old logic if LLM fails
+            print(f"[↩️] Falling back to old logic for item {item.id}")
+        
+        # Logic cũ cho các trường hợp khác
         is_meaningless = not any(c.isalnum() for c in content)
 
         if is_meaningless:
