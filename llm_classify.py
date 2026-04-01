@@ -39,12 +39,31 @@ class SentimentAnalyzer:
     def merge_unique_article_text(self, article):
         """
         Merge và loại bỏ text trùng lặp từ title, description, content
+        
+        Nếu article có:
+        - type = "newsTopic"
+        - index thuộc nhóm cần check (có trong keywords_dict)
+        Thì chỉ dùng title + description, không dùng content
         """
-        parts = [
-            str(article.get("title", "")).strip(),
-            str(article.get("description", "")).strip(),
-            str(article.get("content", "")).strip(),
-        ]
+        # Kiểm tra điều kiện đặc biệt: newsTopic và index cần check
+        article_type = article.get("type", "")
+        article_index = article.get("index", "")
+        
+        # Nếu là newsTopic và index có trong keywords_dict (nhóm cần check)
+        # thì chỉ dùng title + description
+        if article_type == "newsTopic" and article_index in self.keywords_dict:
+            parts = [
+                str(article.get("title", "")).strip(),
+                str(article.get("description", "")).strip(),
+            ]
+        else:
+            # Trường hợp bình thường: dùng cả title, description, content
+            parts = [
+                str(article.get("title", "")).strip(),
+                str(article.get("description", "")).strip(),
+                str(article.get("content", "")).strip(),
+            ]
+        
         parts = [p for p in parts if p]
 
         normalized = [re.sub(r"\s+", " ", p).strip() for p in parts]
