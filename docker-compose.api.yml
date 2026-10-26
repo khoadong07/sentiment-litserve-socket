@@ -1,0 +1,12 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "5002:5002"
+    env_file:
+      - .env
+    environment:
+      API_WORKERS: "4"
+    restart: unless-stopped

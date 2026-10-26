@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements-api.txt .
+RUN pip install -r requirements-api.txt
+
+COPY api.py llm_classify.py topic_keywords.py keywords.json ./
+
+EXPOSE 5002
+
+ENV API_WORKERS=4
+
+# Config (INFER_URL, LLM_BASE_URL, LLM_MODEL, LLM_API_TOKEN) is passed at runtime, not baked in.
+CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port 5002 --workers ${API_WORKERS}"]
